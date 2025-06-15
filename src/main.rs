@@ -1,3 +1,4 @@
+use std::fs;
 use std::path::Path;
 
 use anyhow::{Result, bail};
@@ -52,18 +53,13 @@ fn main() -> Result<()> {
         bail!("解析失败")
     };
     let local_path = Path::new(&args.local_path).join(project_name); // "repos/erp_api";
-
-    let repo = Repository::open(local_path)?;
-    let mut remote = repo
-        .find_remote(remote_url)
-        .or_else(|_| repo.remote_anonymous(remote_url))?;
-
-    // 创建克隆配置
+    
+    // credential
     let mut cb = RemoteCallbacks::new();
     // 设置 SSH 凭据回调
-    cb.credentials(|_url, username_from_url, _allowed_types| {
+   cb.credentials(|_url, username_from_url, _allowed_types| {
         // SSH 私钥路径（通常在 ~/.ssh/id_rsa）
-        let private_key = Path::new("ssh/id_rsa");
+        let private_key = Path::new(&args.private_key_path);
         // 公钥路径（通常在 ~/.ssh/id_rsa.pub）
         let public_key = private_key.with_extension("pub");
         // 若密钥有密码，提供密码；否则设为 None
@@ -81,6 +77,44 @@ fn main() -> Result<()> {
     // fetch option
     let mut fo = FetchOptions::new();
     fo.remote_callbacks(cb);
+    
+    if !fs::exists(&local_path)? {
+        // 不存在就clone
+        // Prepare builder.
+        let mut builder = build::RepoBuilder::new();
+        builder.fetch_options(fo);
+        builder.clone(remote_url, &local_path)?;
+    }
+
+    // credential
+    let mut cb = RemoteCallbacks::new();
+    // 设置 SSH 凭据回调
+    cb.credentials(|_url, username_from_url, _allowed_types| {
+        // SSH 私钥路径（通常在 ~/.ssh/id_rsa）
+        let private_key = Path::new(&args.private_key_path);
+        // 公钥路径（通常在 ~/.ssh/id_rsa.pub）
+        let public_key = private_key.with_extension("pub");
+        // 若密钥有密码，提供密码；否则设为 None
+        let passphrase = None;
+
+        // 创建 SSH 密钥凭据
+        Cred::ssh_key(
+            username_from_url.unwrap_or("git"),
+            Some(&public_key),
+            &private_key,
+            passphrase,
+        )
+    });
+
+    // fetch option
+    let mut fo = FetchOptions::new();
+    fo.remote_callbacks(cb);
+    
+    let repo = Repository::open(local_path)?;
+    let mut remote = repo
+        .find_remote(remote_url)
+        .or_else(|_| repo.remote_anonymous(remote_url))?;
+    
 
     let references = repo.references()?;
     for reference in references {
@@ -115,35 +149,6 @@ fn main() -> Result<()> {
             }
         }
     }
-
-    return Ok(());
-
-    // 创建克隆配置
-    let mut cb = RemoteCallbacks::new();
-    // 设置 SSH 凭据回调
-    cb.credentials(|url, username_from_url, allowed_types| {
-        // SSH 私钥路径（通常在 ~/.ssh/id_rsa）
-        let private_key = Path::new(&args.private_key_path);
-        // 公钥路径（通常在 ~/.ssh/id_rsa.pub）
-        let public_key = private_key.with_extension("pub");
-        // 若密钥有密码，提供密码；否则设为 None
-        let passphrase = None;
-
-        // 创建 SSH 密钥凭据
-        Cred::ssh_key(
-            username_from_url.unwrap_or("git"),
-            Some(&public_key),
-            &private_key,
-            passphrase,
-        )
-    });
-
-    // Prepare fetch options.
-    let mut fo = FetchOptions::new();
-    fo.remote_callbacks(cb);
-    // Prepare builder.
-    let mut builder = build::RepoBuilder::new();
-    builder.fetch_options(fo);
-    builder.clone(remote_url, &local_path)?;
+    
     Ok(())
 }
